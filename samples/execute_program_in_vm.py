@@ -76,15 +76,29 @@ def main():
 
     args = get_args()
     try:
-        service_instance = connect.SmartConnect(host=args.host,
-                                                user=args.user,
-                                                pwd=args.password,
-                                                port=int(args.port))
+        if args.disable_ssl_verification:
+            service_instance = connect.SmartConnectNoSSL(host=args.host,
+                                                         user=args.user,
+                                                         pwd=args.password,
+                                                         port=int(args.port))
+        else:
+            service_instance = connect.SmartConnect(host=args.host,
+                                                    user=args.user,
+                                                    pwd=args.password,
+                                                    port=int(args.port))
 
         atexit.register(connect.Disconnect, service_instance)
         content = service_instance.RetrieveContent()
 
-        vm = content.searchIndex.FindByUuid(None, args.vm_uuid, True)
+        # if instanceUuid is false it will search for VM BIOS UUID instead
+        vm = content.searchIndex.FindByUuid(datacenter=None,
+                                            uuid=args.vm_uuid,
+                                            vmSearch=True,
+                                            instanceUuid=False)
+
+        if not vm:
+            raise SystemExit("Unable to locate the virtual machine.")
+
         tools_status = vm.guest.toolsStatus
         if (tools_status == 'toolsNotInstalled' or
                 tools_status == 'toolsNotRunning'):
@@ -107,7 +121,27 @@ def main():
             res = pm.StartProgramInGuest(vm, creds, ps)
 
             if res > 0:
-                print "Program executed, PID is %d" % res
+                print "Program submitted, PID is %d" % res
+                pid_exitcode = pm.ListProcessesInGuest(vm, creds,
+                                                       [res]).pop().exitCode
+                # If its not a numeric result code, it says None on submit
+                while (re.match('[^0-9]+', str(pid_exitcode))):
+                    print "Program running, PID is %d" % res
+                    time.sleep(5)
+                    pid_exitcode = pm.ListProcessesInGuest(vm, creds,
+                                                           [res]).pop().\
+                        exitCode
+                    if (pid_exitcode == 0):
+                        print "Program %d completed with success" % res
+                        break
+                    # Look for non-zero code to fail
+                    elif (re.match('[1-9]+', str(pid_exitcode))):
+                        print "ERROR: Program %d completed with Failute" % res
+                        print "  tip: Try running this on guest %r to debug" \
+                            % summary.guest.ipAddress
+                        print "ERROR: More info on process"
+                        print pm.ListProcessesInGuest(vm, creds, [res])
+                        break
 
         except IOError, e:
             print e

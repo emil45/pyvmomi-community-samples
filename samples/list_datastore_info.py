@@ -9,6 +9,7 @@ associated devices
 import argparse
 import atexit
 import json
+import ssl
 
 from pyVim import connect
 from pyVmomi import vmodl
@@ -33,6 +34,10 @@ def get_args():
                         help='Password to use when connecting to host')
     parser.add_argument('-j', '--json', default=False, action='store_true',
                         help='Output to JSON')
+    parser.add_argument('-S', '--disable_ssl_verification',
+                        required=False,
+                        action='store_true',
+                        help='Disable ssl host certificate verification')
     args = parser.parse_args()
     return args
 
@@ -59,13 +64,13 @@ def print_fs(host_fs):
     :param host_fs:
     :return:
     """
-    print "{}\t{}\t".format("Datastore:     ", host_fs.volume.name)
-    print "{}\t{}\t".format("UUID:          ", host_fs.volume.uuid)
-    print "{}\t{}\t".format("Capacity:      ", sizeof_fmt(
-        host_fs.volume.capacity))
-    print "{}\t{}\t".format("VMFS Version:  ", host_fs.volume.version)
-    print "{}\t{}\t".format("Is Local VMFS: ", host_fs.volume.local)
-    print "{}\t{}\t".format("SSD:           ", host_fs.volume.ssd)
+    print("{}\t{}\t".format("Datastore:     ", host_fs.volume.name))
+    print("{}\t{}\t".format("UUID:          ", host_fs.volume.uuid))
+    print("{}\t{}\t".format("Capacity:      ", sizeof_fmt(
+        host_fs.volume.capacity)))
+    print("{}\t{}\t".format("VMFS Version:  ", host_fs.volume.version))
+    print("{}\t{}\t".format("Is Local VMFS: ", host_fs.volume.local))
+    print("{}\t{}\t".format("SSD:           ", host_fs.volume.ssd))
 
 
 def main():
@@ -78,11 +83,18 @@ def main():
 
     cli.prompt_for_password(args)
 
+    sslContext = None
+
+    if args.disable_ssl_verification:
+        sslContext = ssl.SSLContext(ssl.PROTOCOL_SSLv23)
+        sslContext.verify_mode = ssl.CERT_NONE
+
     try:
         service_instance = connect.SmartConnect(host=args.host,
                                                 user=args.user,
                                                 pwd=args.password,
-                                                port=int(args.port))
+                                                port=int(args.port),
+                                                sslContext=sslContext)
         if not service_instance:
             print("Could not connect to the specified host using specified "
                   "username and password")
@@ -101,7 +113,7 @@ def main():
         datastores = {}
         for esxi_host in esxi_hosts:
             if not args.json:
-                print "{}\t{}\t\n".format("ESXi Host:    ", esxi_host.name)
+                print("{}\t{}\t\n".format("ESXi Host:    ", esxi_host.name))
 
             # All Filesystems on ESXi host
             storage_system = esxi_host.configManager.storageSystem
@@ -130,9 +142,9 @@ def main():
                     extent_count = 0
                     for extent in extents:
                         if not args.json:
-                            print "{}\t{}\t".format(
+                            print("{}\t{}\t".format(
                                 "Extent[" + str(extent_count) + "]:",
-                                extent.diskName)
+                                extent.diskName))
                             extent_count += 1
                         else:
                             # create an array of the devices backing the given
@@ -150,10 +162,10 @@ def main():
             datastores[esxi_host.name] = datastore_dict
 
         if args.json:
-            print json.dumps(datastores)
+            print(json.dumps(datastores))
 
     except vmodl.MethodFault as error:
-        print "Caught vmodl fault : " + error.msg
+        print("Caught vmodl fault : " + error.msg)
         return -1
 
     return 0
